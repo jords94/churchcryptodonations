@@ -1,0 +1,477 @@
+// ============================================
+// CHURCH CRYPTO DONATIONS PLATFORM
+// Database Schema
+// ============================================
+//
+// This Prisma schema defines the complete data model for the platform
+// including churches, users, wallets, transactions, and audit logs.
+//
+// Security notes:
+// - Seed phrases are NEVER stored in the database (non-custodial approach)
+// - Only public wallet addresses are persisted
+// - All sensitive operations are logged in AuditLog table
+// - User passwords are hashed via Supabase Auth (not stored here)
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // Direct connection for Prisma migrations (bypasses connection pooling)
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ============================================
+// ORGANIZATIONS & USERS
+// ============================================
+
+/**
+ * Church model
+ *
+ * Represents a church organization using the platform
+ * Each church can have multiple users, wallets, and subscription tiers
+ */
+model Church {
+  id              String    @id @default(cuid())
+  name            String
+  slug            String    @unique // URL-friendly identifier for donation pages: /donate/church-slug
+  email           String
+  phone           String?
+  address         String?
+  logo            String?   // URL to uploaded logo (stored in Supabase Storage)
+  brandColor      String    @default("#000000") // Hex color for QR code customization
+
+  // Subscription management (Stripe integration)
+  subscriptionTier       SubscriptionTier   @default(BASIC)
+  subscriptionStatus     SubscriptionStatus @default(TRIAL)
+  stripeCustomerId       String?  @unique
+  stripeSubscriptionId   String?  @unique
+  trialEndsAt            DateTime?
+  subscriptionEndsAt     DateTime?
+
+  // Church-specific settings
+  enabledChains   String[]  // Array of enabled cryptocurrencies: ["BTC", "ETH", "USDC", "XRP"]
+  donationMessage String?   // Custom message displayed on donation page
+
+  // Relationships
+  users           ChurchUser[]    // Many-to-many with users
+  wallets         Wallet[]
+  transactions    Transaction[]
+  auditLogs       AuditLog[]
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([slug])
+}
+
+/**
+ * Subscription tier enumeration
+ *
+ * Determines which features are available to each church
+ */
+enum SubscriptionTier {
+  BASIC       // 1 blockchain, basic analytics, 1 admin user
+  PRO         // All 4 blockchains, advanced analytics, multiple users
+  ENTERPRISE  // White-label branding, API access, priority support, unlimited users
+}
+
+/**
+ * Subscription status enumeration
+ *
+ * Tracks the current state of a church's subscription
+ */
+enum SubscriptionStatus {
+  TRIAL       // Free trial period (14 days)
+  ACTIVE      // Paid and active
+  PAST_DUE    // Payment failed, grace period
+  CANCELED    // Subscription canceled by church
+  EXPIRED     // Trial or subscription ended
+}
+
+/**
+ * User model
+ *
+ * Represents individual users who can belong to multiple churches
+ * Authentication is handled by Supabase Auth (passwords stored there)
+ */
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  name            String
+  passwordHash    String    // Handled by Supabase Auth, not directly managed
+  phone           String?
+  avatar          String?   // URL to profile picture
+
+  emailVerified   Boolean   @default(false)
+  mfaEnabled      Boolean   @default(false)  // Multi-factor authentication status
+
+  // Relationships
+  churches        ChurchUser[]  // Many-to-many with churches
+  auditLogs       AuditLog[]
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  lastLoginAt     DateTime?
+
+  @@index([email])
+}
+
+/**
+ * ChurchUser junction table
+ *
+ * Implements many-to-many relationship between churches and users
+ * Includes role-based access control (RBAC) information
+ */
+model ChurchUser {
+  id          String    @id @default(cuid())
+
+  churchId    String
+  church      Church    @relation(fields: [churchId], references: [id], onDelete: Cascade)
+
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  role        UserRole  @default(MEMBER)
+
+  // Invitation tracking
+  invitedBy   String?   // User ID of the person who sent the invitation
+  invitedAt   DateTime  @default(now())
+  acceptedAt  DateTime? // Null if invitation not yet accepted
+
+  isActive    Boolean   @default(true)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([churchId, userId]) // A user can only belong to a church once
+  @@index([churchId])
+  @@index([userId])
+}
+
+/**
+ * User role enumeration
+ *
+ * Defines permission levels within a church organization
+ * See RBAC permission matrix in documentation for detailed permissions
+ */
+enum UserRole {
+  ADMIN      // Full access: manage wallets, users, subscriptions, off-ramp funds
+  TREASURER  // Financial access: view transactions, analytics, off-ramp funds
+  MEMBER     // Read-only: view wallets and transactions for transparency
+}
+
+// ============================================
+// WALLETS & TRANSACTIONS
+// ============================================
+
+/**
+ * Wallet model
+ *
+ * Represents a cryptocurrency wallet for a specific blockchain
+ * SECURITY: Only public addresses are stored, never private keys or seed phrases
+ */
+model Wallet {
+  id              String    @id @default(cuid())
+
+  churchId        String
+  church          Church    @relation(fields: [churchId], references: [id], onDelete: Cascade)
+
+  chain           Chain
+  address         String    // Public wallet address (safe to store and display)
+
+  // NON-CUSTODIAL SECURITY:
+  // Seed phrases are NEVER stored in database
+  // Church admins must securely save their seed phrase during wallet creation
+  // We only store the derivation path for reference
+  derivationPath  String    // BIP44 path (e.g., m/44'/0'/0'/0/0)
+
+  label           String?   // Optional nickname: "Sunday Offering", "Building Fund"
+  isActive        Boolean   @default(true)
+
+  // Cached balance information (updated periodically via cron jobs)
+  balanceCrypto   String    @default("0") // Stored as string to preserve precision
+  balanceUsd      String    @default("0") // USD equivalent at last update
+  lastBalanceUpdate DateTime?
+
+  // Relationships
+  transactions    Transaction[]
+  qrCodes         QRCode[]
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([churchId, chain, address]) // Each church can have one wallet per chain per address
+  @@index([churchId])
+  @@index([address])
+}
+
+/**
+ * Chain enumeration
+ *
+ * Supported blockchain networks
+ */
+enum Chain {
+  BTC   // Bitcoin
+  ETH   // Ethereum
+  USDC  // USD Coin (ERC-20 token on Ethereum)
+  XRP   // XRP Ledger
+}
+
+/**
+ * Transaction model
+ *
+ * Records all incoming donations to church wallets
+ * Transactions are immutable once confirmed for audit trail integrity
+ */
+model Transaction {
+  id              String    @id @default(cuid())
+
+  churchId        String
+  church          Church    @relation(fields: [churchId], references: [id], onDelete: Cascade)
+
+  walletId        String
+  wallet          Wallet    @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  // Blockchain transaction data
+  txHash          String    @unique  // Unique transaction hash from blockchain
+  chain           Chain
+  fromAddress     String?   // Donor's wallet address (if available)
+  toAddress       String    // Church wallet address (receiving)
+
+  amountCrypto    String    // Amount in cryptocurrency (e.g., "0.5" BTC)
+  amountUsd       String    // USD value at time of transaction
+
+  status          TransactionStatus @default(PENDING)
+  confirmations   Int       @default(0)
+
+  // Optional donor information (for receipts and thank-you messages)
+  donorName       String?
+  donorEmail      String?
+  message         String?   // Personal message from donor
+
+  // Blockchain metadata
+  blockNumber     String?
+  gasUsed         String?   // For Ethereum transactions
+  transactedAt    DateTime  // Timestamp from blockchain
+
+  // Receipt tracking
+  receiptSent     Boolean   @default(false)
+  receiptSentAt   DateTime?
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([churchId])
+  @@index([walletId])
+  @@index([txHash])
+  @@index([status])
+  @@index([transactedAt]) // For date-range queries
+}
+
+/**
+ * Transaction status enumeration
+ *
+ * Tracks confirmation state of blockchain transactions
+ */
+enum TransactionStatus {
+  PENDING    // Waiting for sufficient blockchain confirmations
+  CONFIRMED  // Confirmed with threshold confirmations (BTC: 3, ETH: 12, XRP: 1)
+  FAILED     // Transaction failed on blockchain
+}
+
+// ============================================
+// QR CODES & DONATION PAGES
+// ============================================
+
+/**
+ * QRCode model
+ *
+ * Stores generated QR codes for donation collection
+ * Churches can create multiple QR codes per wallet for different campaigns
+ */
+model QRCode {
+  id              String    @id @default(cuid())
+
+  walletId        String
+  wallet          Wallet    @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  qrCodeUrl       String    // URL to generated QR code image (stored in S3/Supabase Storage)
+  donationPageUrl String    // Full URL: https://platform.com/donate/church-slug?wallet=xyz
+
+  // Customization options
+  label           String?   // Campaign name: "Sunday Offering", "Building Fund", "Mission Trip"
+  suggestedAmounts String[] // Pre-filled amounts in USD: ["10", "25", "50", "100"]
+
+  isActive        Boolean   @default(true)
+  viewCount       Int       @default(0)  // Track how many times QR page was viewed
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([walletId])
+}
+
+// ============================================
+// MOONPAY INTEGRATION
+// ============================================
+
+/**
+ * MoonPayTransaction model
+ *
+ * Tracks MoonPay on-ramp, off-ramp, and swap transactions
+ * Synced via MoonPay webhooks
+ */
+model MoonPayTransaction {
+  id                  String    @id @default(cuid())
+
+  churchId            String
+
+  externalId          String    @unique // MoonPay transaction ID
+  type                MoonPayType
+
+  // Amount details
+  baseCurrencyCode    String    // Fiat currency: "USD", "EUR"
+  baseCurrencyAmount  String    // Fiat amount
+  cryptoCurrencyCode  String    // Crypto currency: "BTC", "ETH", "USDC", "XRP"
+  cryptoCurrencyAmount String   // Crypto amount
+
+  status              String    // MoonPay status: "pending", "waitingPayment", "completed", "failed"
+
+  // Wallet information
+  walletAddress       String    // Destination/source wallet address
+
+  // Fee tracking
+  feeAmount           String?   // MoonPay fee
+  networkFeeAmount    String?   // Blockchain network fee (gas)
+
+  webhookData         Json?     // Store complete webhook payload for debugging
+
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([externalId])
+  @@index([churchId])
+  @@index([status])
+}
+
+/**
+ * MoonPay transaction type enumeration
+ */
+enum MoonPayType {
+  BUY   // On-ramp: fiat currency to cryptocurrency
+  SELL  // Off-ramp: cryptocurrency to fiat currency (bank account)
+  SWAP  // Swap: cryptocurrency to cryptocurrency
+}
+
+// ============================================
+// SECURITY & AUDIT
+// ============================================
+
+/**
+ * AuditLog model
+ *
+ * Comprehensive audit trail for all critical operations
+ * Required for:
+ * - Security monitoring and threat detection
+ * - Compliance and regulatory requirements
+ * - Church financial transparency
+ * - Incident investigation
+ */
+model AuditLog {
+  id          String    @id @default(cuid())
+
+  churchId    String?
+  church      Church?   @relation(fields: [churchId], references: [id], onDelete: Cascade)
+
+  userId      String?
+  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Action details
+  action      String    // Action type: "WALLET_CREATED", "USER_INVITED", "FUNDS_WITHDRAWN", "LOGIN_FAILED"
+  resource    String    // Resource type: "Wallet", "User", "Transaction", "Subscription"
+  resourceId  String?   // ID of affected resource
+
+  // Security metadata
+  ipAddress   String?   // IP address of user performing action
+  userAgent   String?   // Browser/device information
+
+  metadata    Json?     // Additional context (e.g., old values, new values, error messages)
+
+  createdAt   DateTime  @default(now())
+
+  @@index([churchId])
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ============================================
+// EDUCATION & TRAINING
+// ============================================
+
+/**
+ * Tutorial model
+ *
+ * Stores educational content for church administrators
+ * Helps non-technical users understand crypto wallets and blockchain
+ */
+model Tutorial {
+  id          String    @id @default(cuid())
+
+  title       String
+  slug        String    @unique
+  category    TutorialCategory
+
+  content     String    @db.Text  // Markdown content
+  videoUrl    String?   // Optional YouTube/Vimeo embed URL
+
+  order       Int       // Display order within category
+  isPublished Boolean   @default(true)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([category])
+  @@index([order])
+}
+
+/**
+ * Tutorial category enumeration
+ */
+enum TutorialCategory {
+  GETTING_STARTED           // Quick start guides, first wallet creation
+  WALLET_MANAGEMENT         // Creating, securing, and managing wallets
+  RECEIVING_DONATIONS       // QR codes, donation pages, monitoring
+  WITHDRAWING_FUNDS         // Off-ramping to bank accounts, swaps
+  SECURITY_BEST_PRACTICES   // Seed phrase security, 2FA, common scams
+  CRYPTO_BASICS             // What is blockchain, understanding crypto
+}
+
+/**
+ * UserProgress model
+ *
+ * Tracks user onboarding and tutorial completion
+ * Helps personalize the dashboard experience
+ */
+model UserProgress {
+  id          String    @id @default(cuid())
+
+  userId      String
+
+  // Onboarding checklist
+  completedSteps String[] // Steps completed: ["created_wallet", "generated_qr", "invited_user", "received_donation"]
+
+  // Tutorial engagement
+  viewedTutorials String[] // Array of tutorial IDs the user has viewed
+
+  onboardingCompletedAt DateTime?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([userId])
+  @@index([userId])
+}
