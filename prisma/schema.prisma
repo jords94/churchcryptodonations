@@ -52,7 +52,7 @@ model Church {
   subscriptionEndsAt     DateTime?
 
   // Church-specific settings
-  enabledChains   String[]  // Array of enabled cryptocurrencies: ["BTC", "ETH", "USDC", "XRP"]
+  enabledChains   String[]  // Array of enabled cryptocurrencies: ["BTC", "USDC"] (MVP)
   donationMessage String?   // Custom message displayed on donation page
 
   // Relationships
@@ -211,13 +211,14 @@ model Wallet {
 /**
  * Chain enumeration
  *
- * Supported blockchain networks
+ * Supported blockchain networks (MVP: BTC + USDC only)
  */
 enum Chain {
   BTC   // Bitcoin
-  ETH   // Ethereum
   USDC  // USD Coin (ERC-20 token on Ethereum)
-  XRP   // XRP Ledger
+  // MVP-DEFERRED: Additional chains for future
+  // ETH   // Ethereum
+  // XRP   // XRP Ledger
 }
 
 /**
@@ -278,7 +279,7 @@ model Transaction {
  */
 enum TransactionStatus {
   PENDING    // Waiting for sufficient blockchain confirmations
-  CONFIRMED  // Confirmed with threshold confirmations (BTC: 3, ETH: 12, XRP: 1)
+  CONFIRMED  // Confirmed with threshold confirmations (BTC: 3, USDC/ETH: 12)
   FAILED     // Transaction failed on blockchain
 }
 
@@ -335,7 +336,7 @@ model MoonPayTransaction {
   // Amount details
   baseCurrencyCode    String    // Fiat currency: "USD", "EUR"
   baseCurrencyAmount  String    // Fiat amount
-  cryptoCurrencyCode  String    // Crypto currency: "BTC", "ETH", "USDC", "XRP"
+  cryptoCurrencyCode  String    // Crypto currency: "BTC", "USDC" (MVP)
   cryptoCurrencyAmount String   // Crypto amount
 
   status              String    // MoonPay status: "pending", "waitingPayment", "completed", "failed"

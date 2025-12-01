@@ -32,18 +32,20 @@ import { RATE_LIMITS, SUBSCRIPTION_TIERS } from '@/config/constants';
 import { logWalletEvent } from '@/lib/security/auditLog';
 import { generateBitcoinWallet } from '@/lib/crypto/bitcoin';
 import { generateEthereumWallet } from '@/lib/crypto/ethereum';
-import { generateXRPWallet } from '@/lib/crypto/xrp';
+// MVP-DEFERRED: import { generateXRPWallet } from '@/lib/crypto/xrp';
 import { validateAddress } from '@/lib/crypto/validators';
 import { type Chain } from '@/config/chains';
 
 /**
  * Wallet creation request schema
+ * MVP: BTC + USDC only
  */
 const createWalletSchema = z.object({
   churchId: z.string().cuid('Invalid church ID'),
-  chain: z.enum(['BTC', 'ETH', 'USDC', 'XRP'], {
-    errorMap: () => ({ message: 'Invalid blockchain. Must be BTC, ETH, USDC, or XRP' }),
+  chain: z.enum(['BTC', 'USDC'], {
+    errorMap: () => ({ message: 'Invalid blockchain. Must be BTC or USDC (MVP)' }),
   }),
+  // MVP-DEFERRED: chain: z.enum(['BTC', 'ETH', 'USDC', 'XRP']),
   label: z.string().max(50, 'Label too long').optional(),
 });
 
@@ -94,8 +96,9 @@ export async function POST(request: NextRequest) {
     const ipAddress = getIPAddress(request);
     await requirePermission(user.id, churchId, Permission.WALLET_CREATE, ipAddress);
 
+    // MVP-DEFERRED: Rate limiting disabled for MVP
     // 4. Apply rate limiting (5 wallet creations per hour per user)
-    await rateLimitByUser(user.id, 'wallet:create', RATE_LIMITS.API_WALLET_CREATE);
+    // await rateLimitByUser(user.id, 'wallet:create', RATE_LIMITS.API_WALLET_CREATE);
 
     // 5. Get church and validate subscription
     const church = await prisma.church.findUnique({
@@ -120,55 +123,52 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // MVP-DEFERRED: Subscription checks disabled for MVP (all churches get full access)
     // 6. Check if subscription is active
-    if (church.subscriptionStatus !== 'ACTIVE' && church.subscriptionStatus !== 'TRIAL') {
-      return NextResponse.json(
-        {
-          error: 'Inactive subscription',
-          message: 'Your subscription is not active. Please update your payment method.',
-        },
-        { status: 403 }
-      );
-    }
+    // if (church.subscriptionStatus !== 'ACTIVE' && church.subscriptionStatus !== 'TRIAL') {
+    //   return NextResponse.json(
+    //     {
+    //       error: 'Inactive subscription',
+    //       message: 'Your subscription is not active. Please update your payment method.',
+    //     },
+    //     { status: 403 }
+    //   );
+    // }
 
     // 7. Check if chain is enabled for this church
-    if (!church.enabledChains.includes(chain)) {
-      return NextResponse.json(
-        {
-          error: 'Chain not enabled',
-          message: `${chain} is not enabled for your church. Please upgrade your subscription or enable this blockchain.`,
-        },
-        { status: 400 }
-      );
-    }
+    // if (!church.enabledChains.includes(chain)) {
+    //   return NextResponse.json(
+    //     {
+    //       error: 'Chain not enabled',
+    //       message: `${chain} is not enabled for your church. Please upgrade your subscription or enable this blockchain.`,
+    //     },
+    //     { status: 400 }
+    //   );
+    // }
 
     // 8. Check wallet limit based on subscription tier
-    const tierConfig = SUBSCRIPTION_TIERS[church.subscriptionTier];
-    const currentWalletCount = church.wallets.length;
+    // const tierConfig = SUBSCRIPTION_TIERS[church.subscriptionTier];
+    // const currentWalletCount = church.wallets.length;
+    //
+    // if (
+    //   tierConfig.maxWalletsPerChain !== -1 &&
+    //   currentWalletCount >= tierConfig.maxWalletsPerChain
+    // ) {
+    //   return NextResponse.json(
+    //     {
+    //       error: 'Wallet limit reached',
+    //       message: `You have reached the maximum number of ${chain} wallets (${tierConfig.maxWalletsPerChain}) for your ${church.subscriptionTier} plan. Please upgrade to create more wallets.`,
+    //     },
+    //     { status: 403 }
+    //   );
+    // }
 
-    if (
-      tierConfig.maxWalletsPerChain !== -1 &&
-      currentWalletCount >= tierConfig.maxWalletsPerChain
-    ) {
-      return NextResponse.json(
-        {
-          error: 'Wallet limit reached',
-          message: `You have reached the maximum number of ${chain} wallets (${tierConfig.maxWalletsPerChain}) for your ${church.subscriptionTier} plan. Please upgrade to create more wallets.`,
-        },
-        { status: 403 }
-      );
-    }
-
-    // 9. Generate wallet based on chain
+    // 9. Generate wallet based on chain (MVP: BTC + USDC only)
     let generatedWallet;
 
     switch (chain) {
       case 'BTC':
         generatedWallet = generateBitcoinWallet();
-        break;
-
-      case 'ETH':
-        generatedWallet = generateEthereumWallet();
         break;
 
       case 'USDC':
@@ -177,13 +177,17 @@ export async function POST(request: NextRequest) {
         generatedWallet.chain = 'USDC'; // Override chain identifier
         break;
 
-      case 'XRP':
-        generatedWallet = generateXRPWallet();
-        break;
+      // MVP-DEFERRED: Re-enable for post-MVP
+      // case 'ETH':
+      //   generatedWallet = generateEthereumWallet();
+      //   break;
+      // case 'XRP':
+      //   generatedWallet = generateXRPWallet();
+      //   break;
 
       default:
         return NextResponse.json(
-          { error: 'Invalid chain', message: 'Unsupported blockchain network.' },
+          { error: 'Invalid chain', message: 'Unsupported blockchain network (MVP: BTC, USDC only).' },
           { status: 400 }
         );
     }
@@ -243,20 +247,25 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // 13. Log wallet creation for audit trail
-    await logWalletEvent(
-      'WALLET_CREATED',
-      user.id,
-      churchId,
-      wallet.id,
-      chain,
-      wallet.address,
-      ipAddress,
-      {
-        label: label || null,
-        subscriptionTier: church.subscriptionTier,
-      }
-    );
+    // 13. Log wallet creation for audit trail (MVP: optional, don't block if fails)
+    try {
+      await logWalletEvent(
+        'WALLET_CREATED',
+        user.id,
+        churchId,
+        wallet.id,
+        chain,
+        wallet.address,
+        ipAddress,
+        {
+          label: label || null,
+          subscriptionTier: church.subscriptionTier,
+        }
+      );
+    } catch (error) {
+      // MVP: Don't block wallet creation if audit logging fails
+      console.error('Audit logging failed (non-blocking):', error);
+    }
 
     // 14. Return wallet data with seed phrase
     // CRITICAL: This is the ONLY time the seed phrase is provided
