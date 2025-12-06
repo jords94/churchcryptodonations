@@ -1,40 +1,108 @@
 /**
- * Login API Route
+ * ═══════════════════════════════════════════════════════════════════════
+ * LOGIN API ROUTE - Handles User Authentication
+ * ═══════════════════════════════════════════════════════════════════════
  *
- * Handles user authentication including:
- * - Input validation
- * - Rate limiting (prevents brute force attacks)
- * - Supabase authentication
- * - Audit logging
- * - Session creation
+ * WHAT THIS FILE DOES:
+ * This API endpoint handles user login requests. When someone tries to log in,
+ * their browser sends their email and password to this API, which verifies
+ * the credentials and creates a session if they're correct.
  *
- * Security measures:
+ * STEP-BY-STEP FLOW:
+ * 1. User submits login form on website
+ * 2. Form data is sent to this API endpoint (/api/auth/login)
+ * 3. We check if they're trying to login too many times (rate limiting)
+ * 4. We validate the email format and password
+ * 5. We check credentials against Supabase (our authentication service)
+ * 6. If valid, we create a session and return user data
+ * 7. If invalid, we log the failure and return an error
+ *
+ * SECURITY MEASURES (WHY WE NEED THEM):
  * - Rate limiting (5 attempts per 15 minutes)
+ *   WHY: Prevents hackers from trying millions of password combinations
+ *
  * - Account lockout after repeated failures
- * - Audit logging of all attempts
- * - No information leakage (same error for invalid email/password)
+ *   WHY: Stops automated attacks trying to guess passwords
+ *
+ * - Audit logging of all login attempts
+ *   WHY: Lets us detect suspicious activity and investigate breaches
+ *
+ * - No information leakage
+ *   WHY: We don't tell attackers if the email exists or if password was wrong
+ *        We always say "Invalid email or password" instead of being specific
+ *        This prevents attackers from discovering which emails are registered
+ *
+ * FOR BEGINNERS:
+ * - An "API Route" is a function that runs on the server (not in browser)
+ * - It receives data from the browser and sends back a response
+ * - Think of it like a restaurant order: browser orders, API prepares, sends back result
+ * - This file only runs when someone POSTs to /api/auth/login
  */
 
+// ═══ IMPORT STATEMENTS ═══
+// These bring in code from other files that we need
+// Think of imports like borrowing tools from different toolboxes
+
+// Next.js server utilities for handling requests and responses
 import { NextRequest, NextResponse } from 'next/server';
+
+// Supabase client for authentication (a third-party auth service)
+// WHY: We use Supabase instead of building our own auth system for security
 import { supabase } from '@/lib/auth/supabase';
+
+// Session management utilities
+// These help us track user login information and behavior
 import {
-  getIPAddress,
-  getUserAgent,
-  logSuccessfulLogin,
-  logFailedLogin,
+  getIPAddress,      // Gets user's IP address (identifies their location/network)
+  getUserAgent,      // Gets user's browser info (Chrome, Firefox, etc.)
+  logSuccessfulLogin, // Records when someone logs in successfully
+  logFailedLogin,    // Records when someone fails to log in
 } from '@/lib/auth/session';
+
+// Email validation utility
+// WHY: We need to ensure the email is properly formatted
 import { validateEmail } from '@/lib/security/validation';
+
+// Rate limiting utility
+// WHY: Prevents attackers from trying to guess passwords rapidly
 import { rateLimitByIP } from '@/lib/security/rateLimiter';
+
+// Configuration constants (limits, thresholds, etc.)
 import { RATE_LIMITS } from '@/config/constants';
+
+// Zod: A library for data validation
+// WHY: We use it to ensure incoming data has the right format before processing
 import { z } from 'zod';
+
+// Prisma: Our database client
+// WHY: We use it to read/write data to our PostgreSQL database
 import prisma from '@/lib/db/prisma';
 
 /**
- * Login request schema
+ * ═══ LOGIN REQUEST VALIDATION SCHEMA ═══
+ *
+ * WHAT THIS DOES:
+ * Defines the expected structure of login requests.
+ * Like a checklist: "email must be an email, password can't be empty"
+ *
+ * WHY WE NEED THIS:
+ * - Prevents invalid data from reaching our database
+ * - Gives clear error messages when something's wrong
+ * - Stops attacks that send malformed data
+ *
+ * HOW IT WORKS:
+ * Zod checks each field and returns errors if validation fails
  */
 const loginSchema = z.object({
+  // Email must be a valid email format (has @ and domain)
   email: z.string().email('Invalid email address'),
+
+  // Password must be at least 1 character (can't be empty)
+  // WHY min(1) instead of detailed rules: We validate on signup, login just needs non-empty
   password: z.string().min(1, 'Password is required'),
+
+  // "Remember me" checkbox is optional (true/false or not provided)
+  // WHY optional: User can choose whether to stay logged in for 30 days
   rememberMe: z.boolean().optional(),
 });
 
