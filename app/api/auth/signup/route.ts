@@ -72,10 +72,8 @@ export async function POST(request: NextRequest) {
   console.log('🌐 Signup API called from IP:', ipAddress);
 
   try {
-    // MVP: Rate limiting temporarily disabled for testing
-    // TODO: Re-enable for production
-    // await rateLimitByIP(ipAddress, 'signup', RATE_LIMITS.AUTH_SIGNUP);
-    console.log('⏭️  Rate limiting skipped (MVP mode)');
+    // Rate limiting enabled for production
+    await rateLimitByIP(ipAddress, 'signup', RATE_LIMITS.AUTH_SIGNUP);
 
     // Parse and validate request body
     const body = await request.json();
