@@ -1,3 +1,6 @@
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
+
 /**
  * Home page component
  *
@@ -6,16 +9,31 @@
  * - Overview of the platform's features
  * - Call-to-action to sign up or learn more
  * - Trust indicators (security, ease of use, support)
- *
- * TODO: Add marketing content, feature highlights, and pricing tiers
  */
 export default function Home() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-between p-24">
       <div className="z-10 max-w-5xl w-full items-center justify-between font-mono text-sm">
-        <h1 className="text-4xl font-bold text-center mb-8">
+        <h1 className="text-4xl font-bold text-center mb-4">
           Church Crypto Donations
         </h1>
+
+        <p className="text-xl text-center text-gray-600 mb-8">
+          Accept cryptocurrency donations with ease and security
+        </p>
+
+        <div className="flex justify-center gap-4 mb-16">
+          <Button asChild size="lg">
+            <Link href="/dashboard">
+              Get Started
+            </Link>
+          </Button>
+          <Button asChild variant="outline" size="lg">
+            <Link href="/dashboard/wallets/create">
+              Create Wallet
+            </Link>
+          </Button>
+        </div>
 
         <div className="mb-32 grid text-center lg:max-w-5xl lg:w-full lg:mb-0 lg:grid-cols-3 lg:text-left">
           <div className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100">
@@ -48,7 +66,7 @@ export default function Home() {
 
         <div className="mt-16 text-center">
           <p className="text-lg text-gray-600 mb-4">
-            Platform setup in progress...
+            Trusted by churches worldwide for secure cryptocurrency donations
           </p>
           <p className="text-sm text-gray-500">
             Accepting BTC, ETH, USDC, and XRP | Powered by MoonPay | Enterprise-grade security
