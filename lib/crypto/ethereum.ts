@@ -93,8 +93,9 @@ export function deriveEthereumWalletFromMnemonic(
   // Convert mnemonic to seed
   const seed = mnemonicToSeedSync(mnemonic);
 
-  // Get BIP44 derivation path for Ethereum
-  const path = getDerivationPath('ETH', accountIndex, addressIndex);
+  // Get BIP44 derivation path for Ethereum (USDC uses Ethereum addresses)
+  // MVP: Use USDC chain for derivation path (same as ETH: m/44'/60'/0'/0/0)
+  const path = getDerivationPath('USDC', accountIndex, addressIndex);
 
   // Create HD key from seed
   const hdKey = HDKey.fromMasterSeed(seed);
@@ -115,7 +116,7 @@ export function deriveEthereumWalletFromMnemonic(
   return {
     address,
     derivationPath: path,
-    chain: 'ETH',
+    chain: 'USDC', // MVP: Return USDC as chain (Ethereum addresses work for USDC)
     mnemonic,
     publicKey,
   };

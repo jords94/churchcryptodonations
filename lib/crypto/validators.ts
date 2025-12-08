@@ -4,17 +4,20 @@
  * Unified validation functions for all supported blockchain addresses.
  * Provides a single interface for validating addresses across different chains.
  *
+ * MVP: BTC + USDC only
  * Supported chains:
  * - Bitcoin (BTC): Legacy, SegWit, Native SegWit
- * - Ethereum (ETH): EIP-55 checksummed addresses
  * - USDC: Same as Ethereum (ERC-20 token)
+ *
+ * MVP-DEFERRED:
+ * - Ethereum (ETH): EIP-55 checksummed addresses
  * - XRP: XRP Ledger addresses
  */
 
 import { type Chain } from '@/config/chains';
 import { validateBitcoinAddress } from './bitcoin';
 import { validateEthereumAddress, validateUSDCAddress } from './ethereum';
-import { validateXRPAddress } from './xrp';
+// MVP-DEFERRED: import { validateXRPAddress } from './xrp';
 
 /**
  * Validate blockchain address for any supported chain
@@ -38,15 +41,15 @@ export function validateAddress(address: string, chain: Chain): boolean {
     case 'BTC':
       return validateBitcoinAddress(address);
 
-    case 'ETH':
-      return validateEthereumAddress(address);
-
     case 'USDC':
       // USDC uses Ethereum addresses (ERC-20 token)
       return validateUSDCAddress(address);
 
-    case 'XRP':
-      return validateXRPAddress(address);
+    // MVP-DEFERRED: Re-enable for post-MVP
+    // case 'ETH':
+    //   return validateEthereumAddress(address);
+    // case 'XRP':
+    //   return validateXRPAddress(address);
 
     default:
       throw new Error(`Unsupported chain: ${chain}`);
@@ -96,9 +99,10 @@ export function validateMultipleAddresses(
 export function getAddressFormatDescription(chain: Chain): string {
   const descriptions: Record<Chain, string> = {
     BTC: 'Bitcoin addresses can start with 1 (Legacy), 3 (SegWit), or bc1 (Native SegWit). We recommend bc1 for lower fees.',
-    ETH: 'Ethereum addresses are 42 characters starting with 0x. They are case-sensitive (checksummed).',
     USDC: 'USDC uses Ethereum addresses (42 characters starting with 0x). Same format as ETH.',
-    XRP: 'XRP addresses start with "r" and are 25-35 characters. Minimum 10 XRP balance required to activate.',
+    // MVP-DEFERRED:
+    // ETH: 'Ethereum addresses are 42 characters starting with 0x. They are case-sensitive (checksummed).',
+    // XRP: 'XRP addresses start with "r" and are 25-35 characters. Minimum 10 XRP balance required to activate.',
   };
 
   return descriptions[chain];
@@ -115,9 +119,10 @@ export function getAddressFormatDescription(chain: Chain): string {
 export function getExampleAddress(chain: Chain): string {
   const examples: Record<Chain, string> = {
     BTC: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4',
-    ETH: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
     USDC: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
-    XRP: 'rN7n7otQDd6FczFgLdlqtyMVrn3LNU8NsNi',
+    // MVP-DEFERRED:
+    // ETH: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    // XRP: 'rN7n7otQDd6FczFgLdlqtyMVrn3LNU8NsNi',
   };
 
   return examples[chain];
@@ -138,15 +143,16 @@ export function normalizeAddress(address: string, chain: Chain): string {
       // Bitcoin addresses are case-sensitive, return as-is
       return address;
 
-    case 'ETH':
     case 'USDC':
       // Ethereum addresses should be checksummed
       // For now, return lowercase (production: use toChecksumAddress)
       return address.toLowerCase();
 
-    case 'XRP':
-      // XRP addresses are case-sensitive, return as-is
-      return address;
+    // MVP-DEFERRED:
+    // case 'ETH':
+    //   return address.toLowerCase();
+    // case 'XRP':
+    //   return address;
 
     default:
       return address;
@@ -220,16 +226,15 @@ export function guessChainFromAddress(address: string): Chain | null {
     return 'BTC';
   }
 
-  // Ethereum/USDC pattern
+  // Ethereum/USDC pattern (MVP: default to USDC)
   if (/^0x[a-fA-F0-9]{40}$/.test(address)) {
-    // Could be ETH or USDC, default to ETH
-    return 'ETH';
+    return 'USDC'; // MVP: Could be ETH or USDC, defaulting to USDC
   }
 
-  // XRP pattern
-  if (/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(address)) {
-    return 'XRP';
-  }
+  // MVP-DEFERRED: XRP pattern
+  // if (/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(address)) {
+  //   return 'XRP';
+  // }
 
   return null;
 }

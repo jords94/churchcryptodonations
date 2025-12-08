@@ -35,6 +35,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { supabase } from '@/lib/auth/supabase';
 
 /**
  * Login form validation schema
@@ -81,42 +82,26 @@ export default function LoginPage() {
     setIsLoading(true);
     setErrorMessage('');
 
+    console.log('🔐 Login attempt for:', data.email);
+
     try {
-      // Call login API
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
+      // Sign in with Supabase (creates client-side session)
+      const { data: authData, error } = await supabase.auth.signInWithPassword({
+        email: data.email,
+        password: data.password,
       });
 
-      const result = await response.json();
-
-      if (!response.ok) {
-        // Handle specific error cases
-        if (response.status === 429) {
-          setErrorMessage(
-            'Too many login attempts. Please wait a few minutes before trying again.'
-          );
-        } else if (response.status === 403 && result.needsVerification) {
-          setErrorMessage(
-            'Please verify your email address. Check your inbox for the verification link.'
-          );
-        } else {
-          setErrorMessage(result.message || 'Login failed. Please try again.');
-        }
+      if (error || !authData.user) {
+        console.error('❌ Login failed:', error?.message);
+        setErrorMessage('Invalid email or password.');
         return;
       }
 
+      console.log('✅ Login successful!', authData.user.email);
+
       // Login successful - redirect to dashboard
-      // If user has churches, redirect to dashboard
-      // Otherwise, redirect to onboarding
-      if (result.churches && result.churches.length > 0) {
-        router.push('/dashboard');
-      } else {
-        router.push('/onboarding');
-      }
+      // The AuthContext will automatically detect the session change
+      router.push('/dashboard');
     } catch (error) {
       console.error('Login error:', error);
       setErrorMessage('An unexpected error occurred. Please try again later.');

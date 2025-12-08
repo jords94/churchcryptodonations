@@ -21,7 +21,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -35,8 +35,10 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { SeedPhraseBackup } from '@/components/wallets/SeedPhraseBackup';
-import { CHAIN_CONFIG } from '@/config/chains';
+import { CHAIN_CONFIG, SUPPORTED_CHAINS } from '@/config/chains';
 import type { Chain } from '@/config/chains';
+import { useAuth } from '@/lib/auth/AuthContext';
+import { supabase } from '@/lib/auth/supabase';
 
 /**
  * Wallet data from API response
@@ -54,6 +56,7 @@ interface WalletData {
  */
 export default function CreateWalletPage() {
   const router = useRouter();
+  const { user, church, isLoading: isAuthLoading, isLoadingChurches, error: authError } = useAuth();
 
   // Wizard steps
   const [step, setStep] = useState<
@@ -63,7 +66,6 @@ export default function CreateWalletPage() {
   // Form data
   const [selectedChain, setSelectedChain] = useState<Chain | null>(null);
   const [label, setLabel] = useState('');
-  const [churchId, setChurchId] = useState(''); // TODO: Get from context/props
 
   // API response data
   const [walletData, setWalletData] = useState<WalletData | null>(null);
@@ -72,6 +74,41 @@ export default function CreateWalletPage() {
   // UI state
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string>('');
+
+  /**
+   * Redirect if user is not authenticated or has no church
+   */
+  useEffect(() => {
+    if (!isAuthLoading) {
+      if (!user) {
+        router.push('/auth/login');
+      } else if (!church && !isLoadingChurches) {
+        // No church found - this shouldn't happen in MVP since signup creates a church
+        // Redirect back to dashboard
+        console.error('No church found for user - redirecting to dashboard');
+        router.push('/dashboard');
+      }
+    }
+  }, [user, church, isAuthLoading, isLoadingChurches, router]);
+
+  /**
+   * Show loading state while auth context is loading
+   */
+  if (isAuthLoading) {
+    return (
+      <div className="container max-w-4xl mx-auto py-8 px-4">
+        <Card>
+          <CardContent className="py-12">
+            <div className="text-center space-y-4">
+              <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-primary mx-auto" />
+              <div className="text-lg font-semibold">Loading...</div>
+              <p className="text-sm text-gray-600">Verifying your account</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   /**
    * Handle blockchain selection
@@ -102,18 +139,29 @@ export default function CreateWalletPage() {
       return;
     }
 
+    if (!church) {
+      setError('No church context available');
+      return;
+    }
+
     setIsCreating(true);
     setError('');
     setStep('creating');
 
     try {
+      // Get the current session token
+      const { data: { session } } = await supabase.auth.getSession();
+
       const response = await fetch('/api/wallets/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(session?.access_token ? {
+            'Authorization': `Bearer ${session.access_token}`,
+          } : {}),
         },
         body: JSON.stringify({
-          churchId, // TODO: Get from context
+          churchId: church.id,
           chain: selectedChain,
           label: label || undefined,
         }),
@@ -221,7 +269,7 @@ export default function CreateWalletPage() {
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {(['BTC', 'ETH', 'USDC', 'XRP'] as Chain[]).map((chain) => {
+              {SUPPORTED_CHAINS.map((chain) => {
                 const config = CHAIN_CONFIG[chain];
                 const isSelected = selectedChain === chain;
 

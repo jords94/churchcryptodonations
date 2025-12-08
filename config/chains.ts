@@ -11,8 +11,12 @@
 /**
  * Chain type definition
  * Matches the Prisma enum for type safety
+ *
+ * MVP: BTC + USDC only
  */
-export type Chain = 'BTC' | 'ETH' | 'USDC' | 'XRP';
+export type Chain = 'BTC' | 'USDC';
+// MVP-DEFERRED: Additional chains for future
+// export type Chain = 'BTC' | 'ETH' | 'USDC' | 'XRP';
 
 /**
  * Chain configuration interface
@@ -93,37 +97,38 @@ export const CHAIN_CONFIG: Record<Chain, ChainConfig> = {
     icon: '₿',
   },
 
-  /**
-   * Ethereum Configuration
-   *
-   * - Coin type: 60 (BIP44 standard for Ethereum)
-   * - Confirmations: 12 (≈3 minutes for security)
-   * - Uses Alchemy API for real-time webhooks
-   */
-  ETH: {
-    name: 'Ethereum',
-    fullName: 'Ethereum',
-    symbol: 'ETH',
-    decimals: 18, // Ethereum uses 18 decimal places (wei)
-
-    coinType: 60, // BIP44 coin type for Ethereum
-    confirmations: 12, // Wait for 12 confirmations
-    blockTime: 12, // Average 12 seconds per block
-
-    explorerUrl: 'https://etherscan.io',
-    explorerTxPath: '/tx',
-    explorerAddressPath: '/address',
-
-    network: 'mainnet',
-    networkId: 1, // Ethereum mainnet chain ID
-
-    rpcUrl: process.env.ALCHEMY_ETH_RPC_URL || 'https://eth-mainnet.g.alchemy.com/v2/',
-
-    moonpayCurrencyCode: 'eth',
-
-    color: '#627EEA', // Ethereum purple
-    icon: 'Ξ',
-  },
+  // MVP-DEFERRED: Ethereum will be re-enabled post-MVP
+  // /**
+  //  * Ethereum Configuration
+  //  *
+  //  * - Coin type: 60 (BIP44 standard for Ethereum)
+  //  * - Confirmations: 12 (≈3 minutes for security)
+  //  * - Uses Alchemy API for real-time webhooks
+  //  */
+  // ETH: {
+  //   name: 'Ethereum',
+  //   fullName: 'Ethereum',
+  //   symbol: 'ETH',
+  //   decimals: 18, // Ethereum uses 18 decimal places (wei)
+  //
+  //   coinType: 60, // BIP44 coin type for Ethereum
+  //   confirmations: 12, // Wait for 12 confirmations
+  //   blockTime: 12, // Average 12 seconds per block
+  //
+  //   explorerUrl: 'https://etherscan.io',
+  //   explorerTxPath: '/tx',
+  //   explorerAddressPath: '/address',
+  //
+  //   network: 'mainnet',
+  //   networkId: 1, // Ethereum mainnet chain ID
+  //
+  //   rpcUrl: process.env.ALCHEMY_ETH_RPC_URL || 'https://eth-mainnet.g.alchemy.com/v2/',
+  //
+  //   moonpayCurrencyCode: 'eth',
+  //
+  //   color: '#627EEA', // Ethereum purple
+  //   icon: 'Ξ',
+  // },
 
   /**
    * USDC Configuration
@@ -157,36 +162,37 @@ export const CHAIN_CONFIG: Record<Chain, ChainConfig> = {
     icon: '$',
   },
 
-  /**
-   * XRP Configuration
-   *
-   * - Coin type: 144 (BIP44 standard for XRP)
-   * - Confirmations: 1 (XRP has instant finality)
-   * - Uses XRP Ledger WebSocket for real-time monitoring
-   */
-  XRP: {
-    name: 'XRP',
-    fullName: 'XRP Ledger',
-    symbol: 'XRP',
-    decimals: 6, // XRP uses 6 decimal places (drops)
-
-    coinType: 144, // BIP44 coin type for XRP
-    confirmations: 1, // XRP has consensus finality, 1 confirmation is sufficient
-    blockTime: 4, // Average 4 seconds per ledger close
-
-    explorerUrl: 'https://livenet.xrpl.org',
-    explorerTxPath: '/transactions',
-    explorerAddressPath: '/accounts',
-
-    network: 'mainnet',
-
-    rpcUrl: process.env.XRPL_WEBSOCKET_URL || 'wss://xrplcluster.com/',
-
-    moonpayCurrencyCode: 'xrp',
-
-    color: '#23292F', // XRP black
-    icon: '✕',
-  },
+  // MVP-DEFERRED: XRP will be re-enabled post-MVP
+  // /**
+  //  * XRP Configuration
+  //  *
+  //  * - Coin type: 144 (BIP44 standard for XRP)
+  //  * - Confirmations: 1 (XRP has instant finality)
+  //  * - Uses XRP Ledger WebSocket for real-time monitoring
+  //  */
+  // XRP: {
+  //   name: 'XRP',
+  //   fullName: 'XRP Ledger',
+  //   symbol: 'XRP',
+  //   decimals: 6, // XRP uses 6 decimal places (drops)
+  //
+  //   coinType: 144, // BIP44 coin type for XRP
+  //   confirmations: 1, // XRP has consensus finality, 1 confirmation is sufficient
+  //   blockTime: 4, // Average 4 seconds per ledger close
+  //
+  //   explorerUrl: 'https://livenet.xrpl.org',
+  //   explorerTxPath: '/transactions',
+  //   explorerAddressPath: '/accounts',
+  //
+  //   network: 'mainnet',
+  //
+  //   rpcUrl: process.env.XRPL_WEBSOCKET_URL || 'wss://xrplcluster.com/',
+  //
+  //   moonpayCurrencyCode: 'xrp',
+  //
+  //   color: '#23292F', // XRP black
+  //   icon: '✕',
+  // },
 };
 
 /**
@@ -282,8 +288,11 @@ export function formatCryptoAmount(chain: Chain, amount: bigint | string): strin
 /**
  * List of all supported chains
  * Useful for UI dropdowns and iteration
+ *
+ * MVP: BTC + USDC only
  */
-export const SUPPORTED_CHAINS: Chain[] = ['BTC', 'ETH', 'USDC', 'XRP'];
+export const SUPPORTED_CHAINS: Chain[] = ['BTC', 'USDC'];
+// MVP-DEFERRED: export const SUPPORTED_CHAINS: Chain[] = ['BTC', 'ETH', 'USDC', 'XRP'];
 
 /**
  * ERC-20 token contract addresses

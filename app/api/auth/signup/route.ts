@@ -16,13 +16,14 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/auth/supabase';
-import { createDatabaseUser, getIPAddress, getUserAgent } from '@/lib/auth/session';
+import { getSupabaseAdmin } from '@/lib/auth/supabase';
+import { getIPAddress, getUserAgent } from '@/lib/auth/session';
 import { validateEmail, validatePassword } from '@/lib/security/validation';
 import { rateLimitByIP } from '@/lib/security/rateLimiter';
 import { logAuthEvent } from '@/lib/security/auditLog';
 import { RATE_LIMITS } from '@/config/constants';
 import { z } from 'zod';
+import prisma from '@/lib/db/prisma';
 
 /**
  * Signup request schema
@@ -35,25 +36,30 @@ const signupSchema = z.object({
   churchName: z
     .string()
     .min(3, 'Church name must be at least 3 characters')
-    .max(200, 'Church name too long')
-    .optional(), // Optional during signup, can be added later
+    .max(200, 'Church name too long'), // Required for MVP signup
 });
 
 /**
  * POST /api/auth/signup
  *
- * Creates a new user account
+ * Creates a new user account with church (all-in-one signup for MVP)
  *
  * Request body:
  * {
  *   email: string,
  *   password: string,
  *   name: string,
- *   churchName?: string
+ *   churchName: string (required)
  * }
  *
+ * Creates:
+ * - Supabase auth user
+ * - Database User record
+ * - Church record (with auto-generated slug)
+ * - ChurchUser link (user as ADMIN)
+ *
  * Response:
- * - 201: User created successfully
+ * - 201: User and church created successfully
  * - 400: Invalid input
  * - 429: Rate limit exceeded
  * - 409: Email already registered
@@ -63,18 +69,27 @@ export async function POST(request: NextRequest) {
   const ipAddress = getIPAddress(request);
   const userAgent = getUserAgent(request);
 
+  console.log('🌐 Signup API called from IP:', ipAddress);
+
   try {
-    // Apply rate limiting (3 signups per hour from same IP)
-    await rateLimitByIP(ipAddress, 'signup', RATE_LIMITS.AUTH_SIGNUP);
+    // MVP: Rate limiting temporarily disabled for testing
+    // TODO: Re-enable for production
+    // await rateLimitByIP(ipAddress, 'signup', RATE_LIMITS.AUTH_SIGNUP);
+    console.log('⏭️  Rate limiting skipped (MVP mode)');
 
     // Parse and validate request body
     const body = await request.json();
+    console.log('🔍 Signup request received for:', body.email);
+    console.log('📦 Request body:', { name: body.name, churchName: body.churchName, email: body.email });
+
     const validatedData = signupSchema.parse(body);
+    console.log('✅ Validation passed for:', validatedData.email);
 
     // Additional password validation with detailed requirements
     try {
       validatePassword(validatedData.password);
     } catch (error) {
+      console.error('❌ Password validation failed:', error);
       return NextResponse.json(
         {
           error: 'Weak password',
@@ -86,31 +101,41 @@ export async function POST(request: NextRequest) {
 
     // Normalize email
     const email = validateEmail(validatedData.email);
+    console.log('📧 Normalized email:', email);
 
-    // Create Supabase auth user
-    const { data, error } = await supabase.auth.signUp({
+    // Check if we should skip email verification (development mode)
+    const skipEmailVerification = process.env.SKIP_EMAIL_VERIFICATION === 'true';
+    console.log('📧 Skip email verification:', skipEmailVerification);
+
+    // Create Supabase auth user using admin client
+    // This allows us to bypass email verification in development
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data, error } = await supabaseAdmin.auth.admin.createUser({
       email,
       password: validatedData.password,
-      options: {
-        data: {
-          name: validatedData.name,
-        },
-        // Email confirmation required (set in Supabase dashboard)
-        emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback`,
+      email_confirm: skipEmailVerification, // Auto-confirm email in development
+      user_metadata: {
+        name: validatedData.name,
       },
     });
 
     if (error) {
-      // Log failed signup attempt
-      await logAuthEvent(
-        'SIGNUP_FAILED',
-        null,
-        email,
-        ipAddress,
-        userAgent,
-        false,
-        error.message
-      );
+      console.error('❌ Supabase signup error:', error);
+
+      // Log failed signup attempt (non-blocking)
+      try {
+        await logAuthEvent(
+          'SIGNUP_FAILED',
+          null,
+          email,
+          ipAddress,
+          userAgent,
+          false,
+          error.message
+        );
+      } catch (auditError) {
+        console.error('⚠️  Audit logging failed:', auditError);
+      }
 
       // Handle specific error cases
       if (error.message.includes('already registered')) {
@@ -136,18 +161,88 @@ export async function POST(request: NextRequest) {
       throw new Error('User creation failed - no user returned');
     }
 
-    // Create user record in our database
+    console.log('✅ Supabase user created:', data.user.id);
+
+    // Create user, church, and church-user link in a transaction
     try {
-      await createDatabaseUser(email, validatedData.name, data.user.id);
+      console.log('🏗️  Creating database records in transaction...');
+
+      const result = await prisma.$transaction(async (tx) => {
+        // 1. Create user record
+        const user = await tx.user.create({
+          data: {
+            id: data.user!.id,
+            email,
+            name: validatedData.name,
+            passwordHash: '', // Managed by Supabase
+            emailVerified: skipEmailVerification, // Auto-verify in development
+          },
+        });
+        console.log('✅ User record created:', user.id);
+
+        // 2. Create church record
+        // Generate URL-friendly slug from church name
+        const baseSlug = validatedData.churchName
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '');
+
+        // Ensure slug is unique by appending random suffix if needed
+        let slug = baseSlug;
+        let slugExists = await tx.church.findUnique({ where: { slug } });
+        let attempts = 0;
+
+        while (slugExists && attempts < 10) {
+          const randomSuffix = Math.random().toString(36).substring(2, 6);
+          slug = `${baseSlug}-${randomSuffix}`;
+          slugExists = await tx.church.findUnique({ where: { slug } });
+          attempts++;
+        }
+
+        if (slugExists) {
+          throw new Error('Failed to generate unique church slug');
+        }
+
+        const church = await tx.church.create({
+          data: {
+            name: validatedData.churchName,
+            slug,
+            email, // Use user's email as church contact email
+            subscriptionTier: 'BASIC',
+            subscriptionStatus: 'TRIAL',
+            enabledChains: ['BTC', 'USDC'], // MVP: Enable both chains by default
+            trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 days trial
+          },
+        });
+        console.log('✅ Church record created:', church.id, 'slug:', church.slug);
+
+        // 3. Link user to church as ADMIN
+        const churchUser = await tx.churchUser.create({
+          data: {
+            churchId: church.id,
+            userId: user.id,
+            role: 'ADMIN',
+            isActive: true,
+            acceptedAt: new Date(), // Auto-accepted (user is creator)
+          },
+        });
+        console.log('✅ ChurchUser link created:', churchUser.id, 'role: ADMIN');
+
+        return { user, church, churchUser };
+      });
+
+      console.log('🎉 All database records created successfully');
     } catch (dbError) {
-      console.error('Failed to create database user:', dbError);
+      console.error('❌ Failed to create database records:', dbError);
 
       // Attempt to delete Supabase user to keep systems in sync
       // This is a best-effort cleanup
       try {
-        await supabase.auth.admin.deleteUser(data.user.id);
+        console.log('🧹 Attempting to cleanup Supabase user...');
+        await supabaseAdmin.auth.admin.deleteUser(data.user.id);
+        console.log('✅ Supabase user cleanup successful');
       } catch (cleanupError) {
-        console.error('Failed to cleanup Supabase user:', cleanupError);
+        console.error('❌ Failed to cleanup Supabase user:', cleanupError);
       }
 
       return NextResponse.json(
@@ -159,15 +254,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Log successful signup
-    await logAuthEvent('SIGNUP_SUCCESS', data.user.id, email, ipAddress, userAgent, true);
+    // Log successful signup (non-blocking)
+    try {
+      await logAuthEvent('SIGNUP_SUCCESS', data.user.id, email, ipAddress, userAgent, true);
+      console.log('📝 Audit log entry created');
+    } catch (auditError) {
+      console.error('⚠️  Audit logging failed (non-blocking):', auditError);
+      // Don't fail the signup if audit logging fails
+    }
+
+    console.log('🎉 SIGNUP COMPLETE - User and church created successfully');
 
     // Return success response
     return NextResponse.json(
       {
         success: true,
         message:
-          'Registration successful! Please check your email to verify your account.',
+          'Registration successful! Your church has been created. Please check your email to verify your account.',
         user: {
           id: data.user.id,
           email: data.user.email,
@@ -177,10 +280,11 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (error) {
-    console.error('Signup error:', error);
+    console.error('❌ Signup error:', error);
 
     // Handle validation errors
     if (error instanceof z.ZodError) {
+      console.error('❌ Validation error:', error.errors);
       return NextResponse.json(
         {
           error: 'Validation error',
@@ -193,6 +297,7 @@ export async function POST(request: NextRequest) {
 
     // Handle rate limit errors
     if (error instanceof Error && error.message.includes('Too many requests')) {
+      console.error('❌ Rate limit error:', error.message);
       return NextResponse.json(
         {
           error: 'Rate limit exceeded',
@@ -203,6 +308,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Generic error
+    console.error('❌ Unexpected error during signup:', error);
     return NextResponse.json(
       {
         error: 'Internal server error',
