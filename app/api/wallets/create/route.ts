@@ -84,7 +84,7 @@ const createWalletSchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     // 1. Authenticate user
-    const user = await requireAuth();
+    const user = await requireAuth(request);
 
     // 2. Parse and validate request
     const body = await request.json();

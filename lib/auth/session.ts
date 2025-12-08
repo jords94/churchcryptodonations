@@ -9,6 +9,7 @@
 
 import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
+import { createServerClient } from '@supabase/ssr';
 import { supabase, getSupabaseAdmin, getCurrentUser, getCurrentSession } from './supabase';
 import prisma from '@/lib/db/prisma';
 import { logAuthEvent } from '@/lib/security/auditLog';
@@ -26,31 +27,80 @@ export interface UserContext {
 }
 
 /**
- * Get user context from current session
- *
- * Use in Server Components and Server Actions
- *
- * @returns User context or null if not authenticated
- *
- * @example
- * // In a Server Component:
- * const user = await getUserContext();
- *
- * if (!user) {
- *   redirect('/auth/login');
- * }
+ * Get server-side Supabase client that reads from cookies
+ * Use this in API routes to access authenticated sessions
  */
-export async function getUserContext(): Promise<UserContext | null> {
-  // Get Supabase session
-  const session = await getCurrentSession();
+export async function getServerSupabase() {
+  const cookieStore = await cookies();
 
-  if (!session?.user) {
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            );
+          } catch {
+            // The `setAll` method was called from a Server Component.
+            // This can be ignored if you have middleware refreshing user sessions.
+          }
+        },
+      },
+    }
+  );
+}
+
+/**
+ * Get user context from Authorization header or session
+ *
+ * Use in API routes - checks Bearer token first, then falls back to cookies
+ *
+ * @param request - Optional request object to check Authorization header
+ * @returns User context or null if not authenticated
+ */
+export async function getUserContext(request?: Request): Promise<UserContext | null> {
+  let email: string | undefined;
+
+  // First, try to get user from Authorization header (Bearer token)
+  if (request) {
+    const authHeader = request.headers.get('Authorization');
+    if (authHeader?.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      const supabaseAdmin = getSupabaseAdmin();
+
+      const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+
+      if (user && !error) {
+        email = user.email;
+      }
+    }
+  }
+
+  // If no token, try to get from cookies
+  if (!email) {
+    const supabase = await getServerSupabase();
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session?.user) {
+      return null;
+    }
+
+    email = session.user.email;
+  }
+
+  if (!email) {
     return null;
   }
 
   // Get our database user record
   const dbUser = await prisma.user.findUnique({
-    where: { email: session.user.email! },
+    where: { email },
     select: {
       id: true,
       email: true,
@@ -63,7 +113,7 @@ export async function getUserContext(): Promise<UserContext | null> {
   if (!dbUser) {
     // User exists in Supabase but not in our database
     // This could happen if registration wasn't completed
-    console.error('User exists in Supabase but not in database:', session.user.email);
+    console.error('User exists in Supabase but not in database:', email);
     return null;
   }
 
@@ -75,16 +125,17 @@ export async function getUserContext(): Promise<UserContext | null> {
  *
  * Use in API routes and Server Actions that require authentication
  *
+ * @param request - Optional request object to check Authorization header
  * @returns User context
  * @throws Error if not authenticated
  *
  * @example
  * // In API route:
- * const user = await requireAuth();
+ * const user = await requireAuth(request);
  * // If we get here, user is authenticated
  */
-export async function requireAuth(): Promise<UserContext> {
-  const user = await getUserContext();
+export async function requireAuth(request?: Request): Promise<UserContext> {
+  const user = await getUserContext(request);
 
   if (!user) {
     throw new Error('Authentication required');

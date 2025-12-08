@@ -16,7 +16,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/auth/supabase';
+import { getSupabaseAdmin } from '@/lib/auth/supabase';
 import {
   getIPAddress,
   getUserAgent,
@@ -74,13 +74,29 @@ export async function POST(request: NextRequest) {
     // Normalize email
     const email = validateEmail(validatedData.email);
 
-    // Attempt authentication with Supabase
-    const { data, error } = await supabase.auth.signInWithPassword({
+    console.log('🔐 Login attempt for:', email);
+
+    // Attempt authentication with Supabase using admin client
+    const supabaseAdmin = getSupabaseAdmin();
+
+    // First, verify the user exists and get their info
+    const { data: authData, error: getUserError } = await supabaseAdmin.auth.admin.listUsers();
+    const authUser = authData?.users?.find(u => u.email === email);
+
+    console.log('👤 User found in Supabase Auth:', authUser ? 'YES' : 'NO');
+    if (authUser) {
+      console.log('✉️  Email confirmed:', authUser.email_confirmed_at ? 'YES' : 'NO');
+    }
+
+    // Try to sign in with password using admin client
+    const { data, error } = await supabaseAdmin.auth.signInWithPassword({
       email,
       password: validatedData.password,
     });
 
     if (error || !data.user) {
+      console.error('❌ Login failed:', error?.message);
+
       // Log failed login attempt
       await logFailedLogin(
         email,
@@ -94,11 +110,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: 'Authentication failed',
-          message: 'Invalid email or password.',
+          message: 'Invalid email or password. If you just signed up, please delete your account and sign up again.',
         },
         { status: 401 }
       );
     }
+
+    console.log('✅ Login successful for:', email);
 
     // Get user from database
     const dbUser = await prisma.user.findUnique({

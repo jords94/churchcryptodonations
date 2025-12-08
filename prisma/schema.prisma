@@ -27,12 +27,11 @@ generator client {
 // ORGANIZATIONS & USERS
 // ============================================
 
-/**
- * Church model
- *
- * Represents a church organization using the platform
- * Each church can have multiple users, wallets, and subscription tiers
- */
+//
+ // Church model
+ // Represents a church organization using the platform
+ // Each church can have multiple users, wallets, and subscription tiers
+
 model Church {
   id              String    @id @default(cuid())
   name            String
@@ -67,22 +66,20 @@ model Church {
   @@index([slug])
 }
 
-/**
- * Subscription tier enumeration
- *
- * Determines which features are available to each church
- */
+//
+ // Subscription tier enumeration
+ // Determines which features are available to each church
+
 enum SubscriptionTier {
   BASIC       // 1 blockchain, basic analytics, 1 admin user
   PRO         // All 4 blockchains, advanced analytics, multiple users
   ENTERPRISE  // White-label branding, API access, priority support, unlimited users
 }
 
-/**
- * Subscription status enumeration
- *
- * Tracks the current state of a church's subscription
- */
+//
+ // Subscription status enumeration
+ // Tracks the current state of a church's subscription
+
 enum SubscriptionStatus {
   TRIAL       // Free trial period (14 days)
   ACTIVE      // Paid and active
@@ -91,12 +88,11 @@ enum SubscriptionStatus {
   EXPIRED     // Trial or subscription ended
 }
 
-/**
- * User model
- *
- * Represents individual users who can belong to multiple churches
- * Authentication is handled by Supabase Auth (passwords stored there)
- */
+//
+ // User model
+ // Represents individual users who can belong to multiple churches
+ // Authentication is handled by Supabase Auth (passwords stored there)
+
 model User {
   id              String    @id @default(cuid())
   email           String    @unique
@@ -119,12 +115,11 @@ model User {
   @@index([email])
 }
 
-/**
- * ChurchUser junction table
- *
- * Implements many-to-many relationship between churches and users
- * Includes role-based access control (RBAC) information
- */
+//
+ // ChurchUser junction table
+ // Implements many-to-many relationship between churches and users
+ // Includes role-based access control (RBAC) information
+
 model ChurchUser {
   id          String    @id @default(cuid())
 
@@ -151,12 +146,11 @@ model ChurchUser {
   @@index([userId])
 }
 
-/**
- * User role enumeration
- *
- * Defines permission levels within a church organization
- * See RBAC permission matrix in documentation for detailed permissions
- */
+//
+ // User role enumeration
+ // Defines permission levels within a church organization
+ // See RBAC permission matrix in documentation for detailed permissions
+
 enum UserRole {
   ADMIN      // Full access: manage wallets, users, subscriptions, off-ramp funds
   TREASURER  // Financial access: view transactions, analytics, off-ramp funds
@@ -167,12 +161,11 @@ enum UserRole {
 // WALLETS & TRANSACTIONS
 // ============================================
 
-/**
- * Wallet model
- *
- * Represents a cryptocurrency wallet for a specific blockchain
- * SECURITY: Only public addresses are stored, never private keys or seed phrases
- */
+//
+ // Wallet model
+ // Represents a cryptocurrency wallet for a specific blockchain
+ // SECURITY: Only public addresses are stored, never private keys or seed phrases
+
 model Wallet {
   id              String    @id @default(cuid())
 
@@ -208,11 +201,10 @@ model Wallet {
   @@index([address])
 }
 
-/**
- * Chain enumeration
- *
- * Supported blockchain networks (MVP: BTC + USDC only)
- */
+//
+ // Chain enumeration
+ // Supported blockchain networks (MVP: BTC + USDC only)
+
 enum Chain {
   BTC   // Bitcoin
   USDC  // USD Coin (ERC-20 token on Ethereum)
@@ -221,12 +213,11 @@ enum Chain {
   // XRP   // XRP Ledger
 }
 
-/**
- * Transaction model
- *
- * Records all incoming donations to church wallets
- * Transactions are immutable once confirmed for audit trail integrity
- */
+//
+ // Transaction model
+ // Records all incoming donations to church wallets
+ // Transactions are immutable once confirmed for audit trail integrity
+
 model Transaction {
   id              String    @id @default(cuid())
 
@@ -272,11 +263,10 @@ model Transaction {
   @@index([transactedAt]) // For date-range queries
 }
 
-/**
- * Transaction status enumeration
- *
- * Tracks confirmation state of blockchain transactions
- */
+//
+ // Transaction status enumeration
+ // Tracks confirmation state of blockchain transactions
+
 enum TransactionStatus {
   PENDING    // Waiting for sufficient blockchain confirmations
   CONFIRMED  // Confirmed with threshold confirmations (BTC: 3, USDC/ETH: 12)
@@ -287,12 +277,11 @@ enum TransactionStatus {
 // QR CODES & DONATION PAGES
 // ============================================
 
-/**
- * QRCode model
- *
- * Stores generated QR codes for donation collection
- * Churches can create multiple QR codes per wallet for different campaigns
- */
+//
+ // QRCode model
+ // Stores generated QR codes for donation collection
+ // Churches can create multiple QR codes per wallet for different campaigns
+
 model QRCode {
   id              String    @id @default(cuid())
 
@@ -319,12 +308,11 @@ model QRCode {
 // MOONPAY INTEGRATION
 // ============================================
 
-/**
- * MoonPayTransaction model
- *
- * Tracks MoonPay on-ramp, off-ramp, and swap transactions
- * Synced via MoonPay webhooks
- */
+//
+ // MoonPayTransaction model
+ // Tracks MoonPay on-ramp, off-ramp, and swap transactions
+ // Synced via MoonPay webhooks
+
 model MoonPayTransaction {
   id                  String    @id @default(cuid())
 
@@ -358,9 +346,9 @@ model MoonPayTransaction {
   @@index([status])
 }
 
-/**
- * MoonPay transaction type enumeration
- */
+//
+ // MoonPay transaction type enumeration
+
 enum MoonPayType {
   BUY   // On-ramp: fiat currency to cryptocurrency
   SELL  // Off-ramp: cryptocurrency to fiat currency (bank account)
@@ -371,16 +359,15 @@ enum MoonPayType {
 // SECURITY & AUDIT
 // ============================================
 
-/**
- * AuditLog model
- *
- * Comprehensive audit trail for all critical operations
- * Required for:
- * - Security monitoring and threat detection
- * - Compliance and regulatory requirements
- * - Church financial transparency
- * - Incident investigation
- */
+//
+ // AuditLog model
+ // Comprehensive audit trail for all critical operations
+ // Required for:
+ // - Security monitoring and threat detection
+ // - Compliance and regulatory requirements
+ // - Church financial transparency
+ // - Incident investigation
+
 model AuditLog {
   id          String    @id @default(cuid())
 
@@ -413,12 +400,11 @@ model AuditLog {
 // EDUCATION & TRAINING
 // ============================================
 
-/**
- * Tutorial model
- *
- * Stores educational content for church administrators
- * Helps non-technical users understand crypto wallets and blockchain
- */
+//
+ // Tutorial model
+ // Stores educational content for church administrators
+ // Helps non-technical users understand crypto wallets and blockchain
+
 model Tutorial {
   id          String    @id @default(cuid())
 
@@ -439,9 +425,9 @@ model Tutorial {
   @@index([order])
 }
 
-/**
- * Tutorial category enumeration
- */
+//
+ // Tutorial category enumeration
+
 enum TutorialCategory {
   GETTING_STARTED           // Quick start guides, first wallet creation
   WALLET_MANAGEMENT         // Creating, securing, and managing wallets
@@ -451,12 +437,11 @@ enum TutorialCategory {
   CRYPTO_BASICS             // What is blockchain, understanding crypto
 }
 
-/**
- * UserProgress model
- *
- * Tracks user onboarding and tutorial completion
- * Helps personalize the dashboard experience
- */
+//
+ // UserProgress model
+ // Tracks user onboarding and tutorial completion
+ // Helps personalize the dashboard experience
+
 model UserProgress {
   id          String    @id @default(cuid())
 

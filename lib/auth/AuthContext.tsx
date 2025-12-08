@@ -29,6 +29,7 @@ import {
   useContext,
   useEffect,
   useState,
+  useRef,
   ReactNode,
 } from 'react';
 import { User } from '@supabase/supabase-js';
@@ -127,21 +128,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Error state
   const [error, setError] = useState<string | null>(null);
 
+  // Track if we've fetched churches for this user
+  const fetchedChurchesForUserRef = useRef<string | null>(null);
+
   /**
    * Fetch user data from database
    */
   const fetchUser = async (authUser: User) => {
     try {
-      const response = await fetch('/api/auth/me');
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch user data');
-      }
-
-      const data = await response.json();
-      setUser(data.user);
+      // For MVP, just use the Supabase user data directly
+      // In production, you might want to fetch additional data from your database
+      setUser({
+        id: authUser.id,
+        email: authUser.email!,
+        name: authUser.user_metadata?.name || authUser.email!.split('@')[0],
+        emailVerified: !!authUser.email_confirmed_at,
+      });
     } catch (error) {
-      console.error('Error fetching user:', error);
+      console.error('Error setting user:', error);
       setError('Failed to load user data');
       setUser(null);
     }
@@ -155,7 +159,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setError(null);
 
     try {
-      const response = await fetch(`/api/churches/my-churches?userId=${userId}`);
+      // Get the current session token
+      const { data: { session } } = await supabase.auth.getSession();
+
+      const response = await fetch(`/api/churches/my-churches?userId=${userId}`, {
+        headers: session?.access_token ? {
+          'Authorization': `Bearer ${session.access_token}`,
+        } : {},
+      });
 
       if (!response.ok) {
         throw new Error('Failed to fetch churches');
@@ -278,8 +289,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
    * Fetch churches when user is loaded
    */
   useEffect(() => {
-    if (user) {
+    if (user && fetchedChurchesForUserRef.current !== user.id) {
       fetchChurches(user.id);
+      fetchedChurchesForUserRef.current = user.id;
     }
   }, [user]);
 

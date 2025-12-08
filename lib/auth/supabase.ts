@@ -20,16 +20,18 @@ import { createClient } from '@supabase/supabase-js';
  * Environment variable validation
  * Ensures required Supabase credentials are present
  */
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!supabaseUrl) {
-  throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL environment variable');
-}
-
-if (!supabaseAnonKey) {
-  throw new Error('Missing NEXT_PUBLIC_SUPABASE_ANON_KEY environment variable');
+// Only warn about missing credentials in development
+if (typeof window === 'undefined' && process.env.NODE_ENV === 'development') {
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL.includes('dummy')) {
+    console.warn('⚠️  Warning: Using placeholder Supabase credentials');
+    console.warn('⚠️  Signup and authentication will NOT work');
+    console.warn('⚠️  Set up Supabase: https://supabase.com (free tier available)');
+    console.warn('⚠️  See .env.local for setup instructions');
+  }
 }
 
 /**
@@ -72,10 +74,15 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
  */
 export function getSupabaseAdmin() {
   if (!supabaseServiceKey) {
-    throw new Error(
-      'Missing SUPABASE_SERVICE_ROLE_KEY environment variable. ' +
-        'This is required for server-side operations.'
-    );
+    console.warn('⚠️  Warning: SUPABASE_SERVICE_ROLE_KEY not configured');
+    console.warn('⚠️  Admin operations will fail. Set up Supabase to fix this.');
+    // Return a client with the anon key as fallback (will have limited permissions)
+    return createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
   }
 
   return createClient(supabaseUrl, supabaseServiceKey, {

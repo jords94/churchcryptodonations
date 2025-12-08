@@ -35,6 +35,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { supabase } from '@/lib/auth/supabase';
 
 /**
  * Signup form validation schema
@@ -43,6 +44,7 @@ import {
 const signupSchema = z
   .object({
     name: z.string().min(2, 'Name must be at least 2 characters').max(100, 'Name too long'),
+    churchName: z.string().min(3, 'Church name must be at least 3 characters').max(200, 'Church name too long'),
     email: z.string().email('Invalid email address'),
     password: z
       .string()
@@ -137,6 +139,7 @@ export default function SignupPage() {
     resolver: zodResolver(signupSchema),
     defaultValues: {
       name: '',
+      churchName: '',
       email: '',
       password: '',
       confirmPassword: '',
@@ -156,7 +159,17 @@ export default function SignupPage() {
     setErrorMessage('');
     setSuccessMessage('');
 
+    console.log('📝 Signup form submitted:', {
+      name: data.name,
+      churchName: data.churchName,
+      email: data.email
+    });
+
     try {
+      // Sign out any existing session first (clean slate for new signup)
+      await supabase.auth.signOut();
+      console.log('🧹 Cleared any existing session');
+
       // Call signup API
       const response = await fetch('/api/auth/signup', {
         method: 'POST',
@@ -165,10 +178,13 @@ export default function SignupPage() {
         },
         body: JSON.stringify({
           name: data.name,
+          churchName: data.churchName,
           email: data.email,
           password: data.password,
         }),
       });
+
+      console.log('📡 Signup API response status:', response.status);
 
       const result = await response.json();
 
@@ -188,11 +204,32 @@ export default function SignupPage() {
         return;
       }
 
-      // Signup successful - show success message
-      setSuccessMessage(
-        result.message ||
-          'Account created successfully! Please check your email to verify your account.'
-      );
+      // Signup successful - now sign in to create client-side session
+      console.log('✅ Signup successful! Signing in...');
+
+      setSuccessMessage('Account created! Signing you in...');
+
+      // Sign in with Supabase to create client-side session
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: data.email,
+        password: data.password,
+      });
+
+      if (signInError) {
+        console.error('❌ Auto sign-in failed:', signInError);
+        setSuccessMessage('Account created! Please sign in.');
+        setTimeout(() => {
+          window.location.href = '/auth/login';
+        }, 2000);
+        return;
+      }
+
+      console.log('✅ Signed in! Redirecting to dashboard...');
+      setSuccessMessage('Welcome! Redirecting to dashboard...');
+
+      setTimeout(() => {
+        window.location.href = '/dashboard';
+      }, 1000);
     } catch (error) {
       console.error('Signup error:', error);
       setErrorMessage('An unexpected error occurred. Please try again later.');
@@ -236,10 +273,26 @@ export default function SignupPage() {
             // Form state
             <form onSubmit={handleSubmit(onSubmit)}>
               <CardContent className="space-y-4">
-                {/* Error message display */}
+                {/* API Error message display */}
                 {errorMessage && (
                   <div className="rounded-md bg-red-50 p-4 border border-red-200">
                     <p className="text-sm text-red-800">{errorMessage}</p>
+                  </div>
+                )}
+
+                {/* Form Validation Errors Summary */}
+                {Object.keys(errors).length > 0 && (
+                  <div className="rounded-md bg-yellow-50 p-4 border-2 border-yellow-400">
+                    <p className="text-sm font-semibold text-yellow-900 mb-2">
+                      Please fix the following errors:
+                    </p>
+                    <ul className="text-sm text-yellow-800 list-disc list-inside space-y-1">
+                      {errors.name && <li>{errors.name.message}</li>}
+                      {errors.churchName && <li>{errors.churchName.message}</li>}
+                      {errors.email && <li>{errors.email.message}</li>}
+                      {errors.password && <li>{errors.password.message}</li>}
+                      {errors.confirmPassword && <li>{errors.confirmPassword.message}</li>}
+                    </ul>
                   </div>
                 )}
 
@@ -256,6 +309,24 @@ export default function SignupPage() {
                     disabled={isLoading}
                   />
                   {errors.name && <p className="text-sm text-red-600">{errors.name.message}</p>}
+                </div>
+
+                {/* Church name field */}
+                <div className="space-y-2">
+                  <Label htmlFor="churchName">Church name</Label>
+                  <Input
+                    id="churchName"
+                    type="text"
+                    placeholder="First Community Church"
+                    autoComplete="organization"
+                    {...register('churchName')}
+                    aria-invalid={errors.churchName ? 'true' : 'false'}
+                    disabled={isLoading}
+                  />
+                  {errors.churchName && <p className="text-sm text-red-600">{errors.churchName.message}</p>}
+                  <p className="text-xs text-gray-500">
+                    This will be your church's name on the platform
+                  </p>
                 </div>
 
                 {/* Email field */}
