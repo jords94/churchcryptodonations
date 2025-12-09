@@ -107,3 +107,80 @@ export async function GET(
     );
   }
 }
+
+/**
+ * DELETE /api/wallets/:id
+ *
+ * Delete a wallet by ID
+ */
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    // 1. Authenticate user
+    const user = await requireAuth(request);
+
+    const walletId = params.id;
+
+    // 2. Fetch wallet from database
+    const wallet = await prisma.wallet.findUnique({
+      where: { id: walletId },
+      select: {
+        id: true,
+        churchId: true,
+        address: true,
+        chain: true,
+        label: true,
+      },
+    });
+
+    if (!wallet) {
+      return NextResponse.json(
+        { error: 'Wallet not found' },
+        { status: 404 }
+      );
+    }
+
+    // 3. Check RBAC permission for this church
+    try {
+      await requirePermission(
+        user.id,
+        wallet.churchId,
+        Permission.WALLET_DELETE,
+        request.headers.get('x-forwarded-for') || 'unknown'
+      );
+    } catch (error) {
+      return NextResponse.json(
+        { error: 'You do not have permission to delete this wallet' },
+        { status: 403 }
+      );
+    }
+
+    // 4. Delete the wallet (cascading deletes will handle related records)
+    await prisma.wallet.delete({
+      where: { id: walletId },
+    });
+
+    // 5. Return success response
+    return NextResponse.json({
+      success: true,
+      message: 'Wallet deleted successfully',
+    });
+  } catch (error) {
+    console.error('Delete wallet error:', error);
+
+    // Handle authentication errors
+    if (error instanceof Error && error.message === 'Authentication required') {
+      return NextResponse.json(
+        { error: 'Not authenticated' },
+        { status: 401 }
+      );
+    }
+
+    return NextResponse.json(
+      { error: 'Failed to delete wallet' },
+      { status: 500 }
+    );
+  }
+}

@@ -86,6 +86,7 @@ export async function POST(request: NextRequest) {
 
     // 2. Parse and validate request
     const body = await request.json();
+    console.log('Import wallet request:', { churchId: body.churchId, chain: body.chain, hasLabel: !!body.label, mnemonicLength: body.mnemonic?.split(/\s+/).length });
     const validatedData = importWalletSchema.parse(body);
 
     const { churchId, chain, mnemonic, label } = validatedData;
@@ -97,18 +98,29 @@ export async function POST(request: NextRequest) {
     // 4. Validate mnemonic seed phrase
     const cleanedMnemonic = mnemonic.trim().toLowerCase();
 
+    // Debug: Log first/last words for debugging (not the full phrase for security)
+    const words = cleanedMnemonic.split(/\s+/);
+    console.log('Seed phrase validation:', {
+      wordCount: words.length,
+      firstWord: words[0],
+      lastWord: words[words.length - 1],
+      sample: `${words[0]}...${words[words.length - 1]}`
+    });
+
     if (!validateMnemonic(cleanedMnemonic)) {
+      console.log('❌ Mnemonic validation failed - not BIP39 compliant');
       return NextResponse.json(
         {
           error: 'Invalid mnemonic',
-          message: 'The seed phrase you entered is invalid. Please check for typos and ensure all words are correct.',
+          message: 'The seed phrase you entered is invalid. Please check for typos and ensure all words are correct. Note: This platform only supports BIP39-standard seed phrases. Electrum-format seeds are not compatible.',
         },
         { status: 400 }
       );
     }
 
+    console.log('✅ Mnemonic validation passed');
+
     // 5. Validate word count (12 or 24 words)
-    const words = cleanedMnemonic.split(/\s+/);
     if (words.length !== 12 && words.length !== 24) {
       return NextResponse.json(
         {
@@ -287,6 +299,7 @@ export async function POST(request: NextRequest) {
 
     // Handle validation errors
     if (error instanceof z.ZodError) {
+      console.error('Validation errors:', error.errors);
       return NextResponse.json(
         {
           error: 'Validation error',

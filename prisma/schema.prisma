@@ -35,12 +35,30 @@ generator client {
 model Church {
   id              String    @id @default(cuid())
   name            String
+  officialName    String?   // Legal name for tax receipts (if different from display name)
   slug            String    @unique // URL-friendly identifier for donation pages: /donate/church-slug
-  email           String
-  phone           String?
-  address         String?
+
+  // Contact information
+  email           String    // Main contact email (deprecated, use contactEmail)
+  contactEmail    String?   // Primary contact email
+  phone           String?   // Deprecated, use contactPhone
+  contactPhone    String?   // Primary contact phone
+
+  // Address
+  address         String?   // Street address
+  city            String?
+  state           String?   // State/Province
+  postalCode      String?
+  country         String    @default("AU") // ISO country code
+
+  // Branding
   logo            String?   // URL to uploaded logo (stored in Supabase Storage)
-  brandColor      String    @default("#000000") // Hex color for QR code customization
+  brandColor      String    @default("#3B82F6") // Hex color for QR code customization and donation page
+
+  // Tax & Compliance
+  taxId           String?   // Tax identification number (ABN, EIN, etc.)
+  taxIdType       String?   // Type: ABN, EIN, CRN, Other
+  isDgrRegistered Boolean   @default(false) // Deductible Gift Recipient (Australia)
 
   // Subscription management (Stripe integration)
   subscriptionTier       SubscriptionTier   @default(BASIC)
@@ -51,8 +69,12 @@ model Church {
   subscriptionEndsAt     DateTime?
 
   // Church-specific settings
-  enabledChains   String[]  // Array of enabled cryptocurrencies: ["BTC", "USDC"] (MVP)
-  donationMessage String?   // Custom message displayed on donation page
+  enabledChains      String[]  // Array of enabled cryptocurrencies: ["BTC", "USDC"] (MVP)
+  donationMessage    String?   // Custom message displayed on donation page
+  denomination       String?   // Church denomination
+  congregationSize   String?   // Size category: Small, Medium, Large, Mega
+  defaultCurrency    String    @default("AUD") // ISO currency code
+  timezone           String    @default("Australia/Sydney") // IANA timezone
 
   // Relationships
   users           ChurchUser[]    // Many-to-many with users
@@ -99,10 +121,13 @@ model User {
   name            String
   passwordHash    String    // Handled by Supabase Auth, not directly managed
   phone           String?
-  avatar          String?   // URL to profile picture
+  avatarUrl       String?   // URL to profile picture (stored in Supabase Storage)
 
   emailVerified   Boolean   @default(false)
   mfaEnabled      Boolean   @default(false)  // Multi-factor authentication status
+
+  // Notification preferences
+  notificationPreferences Json?  // JSON object storing email notification settings
 
   // Relationships
   churches        ChurchUser[]  // Many-to-many with churches
@@ -192,6 +217,7 @@ model Wallet {
   // Relationships
   transactions    Transaction[]
   qrCodes         QRCode[]
+  valueHistory    WalletValueHistory[]
 
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -460,4 +486,68 @@ model UserProgress {
 
   @@unique([userId])
   @@index([userId])
+}
+
+// ============================================
+// CACHING & PERFORMANCE
+// ============================================
+
+//
+ // TransactionCache model
+ // Caches blockchain transaction data to reduce API calls and avoid rate limits
+ // Transactions are immutable once confirmed, so caching is safe
+ //
+model TransactionCache {
+  id              String    @id @default(cuid())
+
+  walletId        String
+  txHash          String    // Transaction hash (unique per chain)
+  chain           Chain
+
+  // Transaction data
+  fromAddress     String
+  toAddress       String
+  amountCrypto    String
+  amountUsd       String
+  confirmations   Int
+  blockNumber     String?
+  transactedAt    DateTime
+  status          String    // PENDING, CONFIRMED, FAILED
+
+  // Cache metadata
+  fetchedAt       DateTime  @default(now())
+  expiresAt       DateTime  // TTL for cache invalidation
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([walletId, txHash])
+  @@index([walletId])
+  @@index([expiresAt])
+}
+
+//
+ // WalletValueHistory model
+ // Tracks wallet balance over time for historical charts
+ // Records snapshots periodically (e.g., hourly or daily)
+ //
+model WalletValueHistory {
+  id              String    @id @default(cuid())
+
+  walletId        String
+  wallet          Wallet    @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  // Balance snapshot
+  balanceCrypto   String    // Balance in native crypto
+  balanceUsd      String    // USD value at this point in time
+  cryptoPrice     String    // Price per unit of crypto in USD
+
+  // Snapshot metadata
+  snapshotAt      DateTime  @default(now())
+  granularity     String    // HOURLY, DAILY, WEEKLY, MONTHLY
+
+  createdAt       DateTime  @default(now())
+
+  @@index([walletId, snapshotAt])
+  @@index([walletId, granularity])
 }

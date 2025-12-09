@@ -1,24 +1,23 @@
 /**
- * Dashboard Home Page
+ * Dashboard Home Page - Single-Page Experience
  *
- * Main dashboard landing page showing:
- * - Welcome message with user's name
- * - Church information
- * - Real-time stats (wallets, balance, donations)
- * - Quick action buttons
- * - List of active wallets
- * - Getting started guide
- *
- * Fetches live data from the API to display current wallet counts and balances
+ * Consolidated dashboard with panels and modals for all wallet operations.
+ * No page navigation - everything happens here with smooth animations.
  */
 
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { SlidePanel } from '@/components/ui/slide-panel';
+import { Modal } from '@/components/ui/modal';
+import { WalletDetailPanel } from '@/components/dashboard/WalletDetailPanel';
+import { QRCodeModal } from '@/components/dashboard/QRCodeModal';
+import { CreateWalletModal } from '@/components/dashboard/CreateWalletModal';
+import { SwapModal } from '@/components/dashboard/SwapModal';
+import { WithdrawModal } from '@/components/dashboard/WithdrawModal';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { supabase } from '@/lib/auth/supabase';
 import { CHAIN_CONFIG } from '@/config/chains';
@@ -48,57 +47,98 @@ interface DashboardStats {
 }
 
 /**
- * Dashboard page - shows overview and quick actions
+ * Dashboard page - single-page experience
  */
 export default function DashboardPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, church, isLoading: isAuthLoading, signOut } = useAuth();
 
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [isLoadingStats, setIsLoadingStats] = useState(true);
 
-  // Prevent re-fetching stats on re-renders (e.g., desktop switch)
+  // Panel and modal state
+  const [selectedWalletId, setSelectedWalletId] = useState<string | null>(null);
+  const [showQRModal, setShowQRModal] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showSwapModal, setShowSwapModal] = useState(false);
+  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+
+  // Prevent re-fetching stats on re-renders
   const hasFetchedStatsRef = useRef(false);
+  // Track if we've already restored URL state on mount
+  const hasRestoredUrlStateRef = useRef(false);
 
   /**
    * Fetch dashboard stats
    */
-  useEffect(() => {
-    // Skip if already fetched
-    if (hasFetchedStatsRef.current) {
-      return;
-    }
+  const fetchStats = useCallback(async () => {
+    if (!user || !church) return;
 
-    const fetchStats = async () => {
-      if (!user || !church) return;
+    try {
+      setIsLoadingStats(true);
 
-      try {
-        setIsLoadingStats(true);
+      const { data: { session } } = await supabase.auth.getSession();
 
-        const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch(`/api/churches/${church.id}/stats`, {
+        headers: session?.access_token ? {
+          'Authorization': `Bearer ${session.access_token}`,
+        } : {},
+      });
 
-        const response = await fetch(`/api/churches/${church.id}/stats`, {
-          headers: session?.access_token ? {
-            'Authorization': `Bearer ${session.access_token}`,
-          } : {},
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          setStats(data);
-          hasFetchedStatsRef.current = true; // Mark as fetched
-        }
-      } catch (error) {
-        console.error('Error fetching stats:', error);
-      } finally {
-        setIsLoadingStats(false);
+      if (response.ok) {
+        const data = await response.json();
+        setStats(data);
       }
-    };
+    } catch (error) {
+      console.error('Error fetching stats:', error);
+    } finally {
+      setIsLoadingStats(false);
+    }
+  }, [user, church]);
+
+  useEffect(() => {
+    if (hasFetchedStatsRef.current) return;
 
     if (!isAuthLoading && user && church) {
       fetchStats();
+      hasFetchedStatsRef.current = true;
     }
-  }, [user, church, isAuthLoading]);
+  }, [user, church, isAuthLoading, fetchStats]);
+
+  /**
+   * Handle URL state on initial mount only
+   * This prevents modals from reopening on page refresh
+   */
+  useEffect(() => {
+    if (hasRestoredUrlStateRef.current) return;
+
+    const walletParam = searchParams.get('wallet');
+    const actionParam = searchParams.get('action');
+
+    if (walletParam) {
+      setSelectedWalletId(walletParam);
+    }
+
+    if (actionParam === 'create') {
+      setShowCreateModal(true);
+      // Clear the action param from URL immediately to prevent reopen on refresh
+      window.history.replaceState(null, '', '/dashboard');
+    }
+
+    hasRestoredUrlStateRef.current = true;
+  }, [searchParams]);
+
+  /**
+   * Update URL when wallet panel opens/closes
+   */
+  useEffect(() => {
+    if (selectedWalletId) {
+      window.history.replaceState(null, '', `/dashboard?wallet=${selectedWalletId}`);
+    } else {
+      window.history.replaceState(null, '', '/dashboard');
+    }
+  }, [selectedWalletId]);
 
   /**
    * Handle sign out
@@ -116,6 +156,89 @@ export default function DashboardPage() {
       router.push('/auth/login');
     }
   }, [user, isAuthLoading, router]);
+
+  /**
+   * Handle wallet click
+   */
+  const handleWalletClick = (walletId: string) => {
+    setSelectedWalletId(walletId);
+  };
+
+  /**
+   * Handle create wallet
+   */
+  const handleOpenCreateWallet = () => {
+    setShowCreateModal(true);
+    window.history.replaceState(null, '', '/dashboard?action=create');
+  };
+
+  /**
+   * Handle close create wallet
+   */
+  const handleCloseCreateWallet = () => {
+    // Modal will handle the confirmation via CreateWalletModal's handleCancel
+    setShowCreateModal(false);
+    window.history.replaceState(null, '', '/dashboard');
+  };
+
+  /**
+   * Handle wallet created successfully
+   */
+  const handleWalletCreated = (wallet: any) => {
+    setShowCreateModal(false);
+    window.history.replaceState(null, '', '/dashboard');
+
+    // Refresh stats
+    hasFetchedStatsRef.current = false;
+    fetchStats();
+
+    // Open the new wallet
+    setSelectedWalletId(wallet.id);
+  };
+
+  /**
+   * Get selected wallet data
+   */
+  const selectedWallet = stats?.wallets.find((w) => w.id === selectedWalletId);
+
+  /**
+   * Handle delete wallet
+   */
+  const handleDeleteWallet = async () => {
+    if (!selectedWallet) return;
+
+    const confirmMessage = `Are you sure you want to delete this wallet?\n\nLabel: ${selectedWallet.label || 'Unnamed'}\nAddress: ${selectedWallet.address}\n\nThis action cannot be undone.`;
+
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      const response = await fetch(`/api/wallets/${selectedWalletId}`, {
+        method: 'DELETE',
+        headers: session?.access_token ? {
+          'Authorization': `Bearer ${session.access_token}`,
+        } : {},
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to delete wallet');
+      }
+
+      alert('Wallet deleted successfully');
+
+      // Close panel and refresh
+      setSelectedWalletId(null);
+      hasFetchedStatsRef.current = false;
+      fetchStats();
+    } catch (error) {
+      console.error('Error deleting wallet:', error);
+      alert(error instanceof Error ? error.message : 'Failed to delete wallet');
+    }
+  };
 
   /**
    * Loading state
@@ -150,6 +273,9 @@ export default function DashboardPage() {
               <p className="text-sm text-gray-600">{church.name}</p>
             </div>
             <div className="flex gap-3">
+              <Button variant="outline" onClick={() => router.push('/dashboard/profile')}>
+                Profile & Settings
+              </Button>
               <Button variant="outline" onClick={handleSignOut}>Sign Out</Button>
             </div>
           </div>
@@ -240,7 +366,7 @@ export default function DashboardPage() {
             <CardHeader>
               <CardTitle>Your Wallets</CardTitle>
               <CardDescription>
-                Click on a wallet to view details and generate QR codes
+                Click on a wallet to view details, generate QR codes, and manage funds
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -248,11 +374,15 @@ export default function DashboardPage() {
                 {stats.wallets.map((wallet) => {
                   const chainConfig = CHAIN_CONFIG[wallet.chain];
                   return (
-                    <Link key={wallet.id} href={`/dashboard/wallets/${wallet.id}`}>
+                    <button
+                      key={wallet.id}
+                      onClick={() => handleWalletClick(wallet.id)}
+                      className="w-full"
+                    >
                       <div className="flex items-center justify-between p-4 border rounded-lg hover:border-primary hover:bg-gray-50 transition-colors cursor-pointer">
                         <div className="flex items-center gap-4">
                           <div className="text-3xl">{chainConfig.icon}</div>
-                          <div>
+                          <div className="text-left">
                             <div className="font-semibold">
                               {wallet.label || `${chainConfig.name} Wallet`}
                             </div>
@@ -270,7 +400,7 @@ export default function DashboardPage() {
                           </div>
                         </div>
                       </div>
-                    </Link>
+                    </button>
                   );
                 })}
               </div>
@@ -291,42 +421,45 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Link href="/dashboard/wallets/create">
-                <Button className="w-full h-24 text-lg">
-                  <div className="flex flex-col items-center gap-2">
-                    <span className="text-2xl">💰</span>
-                    <span>Create Wallet</span>
-                  </div>
-                </Button>
-              </Link>
+              <Button
+                className="w-full h-24 text-lg"
+                onClick={handleOpenCreateWallet}
+              >
+                <div className="flex flex-col items-center gap-2">
+                  <span className="text-2xl">💰</span>
+                  <span>Create Wallet</span>
+                </div>
+              </Button>
 
-              {walletCount > 0 ? (
-                <Link href="/dashboard/wallets">
-                  <Button variant="outline" className="w-full h-24 text-lg">
-                    <div className="flex flex-col items-center gap-2">
-                      <span className="text-2xl">📱</span>
-                      <span>View Wallets</span>
-                    </div>
-                  </Button>
-                </Link>
-              ) : (
-                <Button variant="outline" className="w-full h-24 text-lg" disabled>
-                  <div className="flex flex-col items-center gap-2">
-                    <span className="text-2xl">📱</span>
-                    <span>View Wallets</span>
+              <Button
+                variant="outline"
+                className="w-full h-24 text-lg"
+                onClick={() => {
+                  if (stats && stats.wallets.length > 0) {
+                    handleWalletClick(stats.wallets[0].id);
+                  }
+                }}
+                disabled={walletCount === 0}
+              >
+                <div className="flex flex-col items-center gap-2">
+                  <span className="text-2xl">📱</span>
+                  <span>View Wallets</span>
+                  {walletCount === 0 && (
                     <span className="text-xs">(Create wallet first)</span>
-                  </div>
-                </Button>
-              )}
+                  )}
+                </div>
+              </Button>
 
-              <Link href="/dashboard/help">
-                <Button variant="outline" className="w-full h-24 text-lg">
-                  <div className="flex flex-col items-center gap-2">
-                    <span className="text-2xl">📚</span>
-                    <span>Help & Learn</span>
-                  </div>
-                </Button>
-              </Link>
+              <Button
+                variant="outline"
+                className="w-full h-24 text-lg"
+                onClick={() => router.push('/dashboard/help')}
+              >
+                <div className="flex flex-col items-center gap-2">
+                  <span className="text-2xl">📚</span>
+                  <span>Help & Learn</span>
+                </div>
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -351,11 +484,13 @@ export default function DashboardPage() {
                     <p className="text-sm text-gray-600">
                       Generate a secure BTC or USDC wallet to receive donations. Your seed phrase will be shown once - save it securely!
                     </p>
-                    <Link href="/dashboard/wallets/create">
-                      <Button variant="link" className="px-0">
-                        Create Wallet →
-                      </Button>
-                    </Link>
+                    <Button
+                      variant="link"
+                      className="px-0"
+                      onClick={handleOpenCreateWallet}
+                    >
+                      Create Wallet →
+                    </Button>
                   </div>
                 </div>
 
@@ -394,6 +529,93 @@ export default function DashboardPage() {
           </p>
         </div>
       </main>
+
+      {/* Wallet Detail Panel */}
+      {selectedWalletId && (
+        <SlidePanel
+          isOpen={true}
+          onClose={() => setSelectedWalletId(null)}
+          title="Wallet Details"
+          width="xl"
+        >
+          <WalletDetailPanel
+            walletId={selectedWalletId}
+            onGenerateQR={() => setShowQRModal(true)}
+            onSwap={() => setShowSwapModal(true)}
+            onWithdraw={() => setShowWithdrawModal(true)}
+            onDelete={handleDeleteWallet}
+            onOpenFullPage={() => router.push(`/dashboard/wallets/${selectedWalletId}`)}
+          />
+        </SlidePanel>
+      )}
+
+      {/* QR Code Modal */}
+      {showQRModal && selectedWallet && (
+        <Modal
+          isOpen={true}
+          onClose={() => setShowQRModal(false)}
+          title="Generate QR Code"
+          size="lg"
+        >
+          <QRCodeModal
+            walletId={selectedWallet.id}
+            walletAddress={selectedWallet.address}
+            walletChain={selectedWallet.chain}
+            walletLabel={selectedWallet.label}
+            churchName={church.name}
+          />
+        </Modal>
+      )}
+
+      {/* Create Wallet Modal */}
+      {showCreateModal && (
+        <Modal
+          isOpen={true}
+          onClose={handleCloseCreateWallet}
+          size="3xl"
+          showCloseButton={false}
+          preventClose={true}
+        >
+          <CreateWalletModal
+            onSuccess={handleWalletCreated}
+            onCancel={handleCloseCreateWallet}
+          />
+        </Modal>
+      )}
+
+      {/* Swap Modal */}
+      {showSwapModal && selectedWallet && (
+        <Modal
+          isOpen={true}
+          onClose={() => setShowSwapModal(false)}
+          title="Swap Cryptocurrency"
+          size="lg"
+        >
+          <SwapModal
+            walletAddress={selectedWallet.address}
+            walletChain={selectedWallet.chain}
+            walletLabel={selectedWallet.label}
+          />
+        </Modal>
+      )}
+
+      {/* Withdraw Modal */}
+      {showWithdrawModal && selectedWallet && (
+        <Modal
+          isOpen={true}
+          onClose={() => setShowWithdrawModal(false)}
+          title="Withdraw to Bank"
+          size="lg"
+        >
+          <WithdrawModal
+            walletAddress={selectedWallet.address}
+            walletChain={selectedWallet.chain}
+            walletLabel={selectedWallet.label}
+            balanceCrypto={selectedWallet.balanceCrypto}
+            balanceUsd={selectedWallet.balanceUsd}
+          />
+        </Modal>
+      )}
     </div>
   );
 }
